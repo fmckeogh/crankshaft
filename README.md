@@ -1,2 +1,2 @@
 # crankshaft
-Alternate VESC firmware, written in Rust
+> Electric vehicle controller firmware
