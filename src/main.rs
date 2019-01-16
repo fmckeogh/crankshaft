@@ -3,48 +3,22 @@
 
 extern crate panic_halt;
 
-use stm32f4xx_hal::{
-    prelude::*,
-    stm32 as device,
-    gpio::{gpiod::PD13, Output, PushPull}
-};
-use cortex_m_semihosting::{debug, hprintln};
+use cortex_m_semihosting::{hprintln};
 use rtfm::app;
+use stm32f4xx_hal::{
+    gpio::{gpiod::PD13, Output, PushPull},
+    prelude::*,
+    stm32::{self as device, EXTI},
+};
 
-/*
-#[entry]
-fn main() -> ! {
-    hprintln!("init").unwrap();
-
-    let dp = device::Peripherals::take().unwrap();
-
-    let mut rcc = dp.RCC.constrain();
-
-    let mut gpiod = dp.GPIOD.split();
-
-    let mut led = gpiod.pd13.into_push_pull_output();
-    
-    let mut delay = Delay::new(cp.SYST, clocks);
-
-    led.set_high();
-
-    hprintln!("blinking...").unwrap();
-
-    loop {
-        led.set_high();
-        delay.delay_ms(1_000_u16);
-        led.set_low();
-        delay.delay_ms(1_000_u16);
-    }
-}
-*/
-
-const PERIOD: u32 = 8_000_000;
+const CLOCK_MHZ: u32 = 90;
+const PERIOD: u32 = 10_000_000;
 
 #[app(device = stm32f4xx_hal::stm32)]
 const APP: () = {
     static mut ON: bool = false;
     static mut LED: PD13<Output<PushPull>> = ();
+    static mut EXTI: EXTI = ();
 
     #[init(spawn = [blinky])]
     fn init() {
@@ -52,16 +26,43 @@ const APP: () = {
 
         let device: device::Peripherals = device;
 
-        let mut gpioa = device.GPIOA.split();
-        let mut gpiob = device.GPIOB.split();
-        let mut gpioc = device.GPIOC.split();
-        let mut gpiod = device.GPIOD.split();
+        device.PWR.cr.modify(|_, w| unsafe { w.vos().bits(0x11) });
+        device
+            .FLASH
+            .acr
+            .modify(|_, w| unsafe { w.latency().bits(0x11) });
 
-        let mut led = gpiod.pd13.into_push_pull_output();
+        let rcc = device.RCC.constrain();
+
+        let _clocks = rcc
+            .cfgr
+            .sysclk(CLOCK_MHZ.mhz())
+            .pclk1((CLOCK_MHZ / 2).mhz())
+            .pclk2(CLOCK_MHZ.mhz())
+            .hclk(CLOCK_MHZ.mhz())
+            .freeze();
+
+        let gpioa = device.GPIOA.split();
+        let _gpiob = device.GPIOB.split();
+        let _gpioc = device.GPIOC.split();
+        let gpiod = device.GPIOD.split();
+
+        let led = gpiod.pd13.into_push_pull_output();
+
+        gpioa.pa0.into_floating_input();
+        device
+            .SYSCFG
+            .exticr1
+            .modify(|_, w| unsafe { w.exti0().bits(0x01) });
+        // Enable interrupt on EXTI0
+        device.EXTI.imr.modify(|_, w| w.mr0().set_bit());
+        // Set falling trigger selection for EXTI0
+        device.EXTI.ftsr.modify(|_, w| w.tr0().set_bit());
 
         spawn.blinky().unwrap();
 
         LED = led;
+        EXTI = device.EXTI;
     }
 
     #[idle]
@@ -79,9 +80,13 @@ const APP: () = {
         }
         *resources.ON ^= true;
 
-        schedule
-            .blinky(scheduled + PERIOD.cycles())
-            .unwrap();
+        schedule.blinky(scheduled + PERIOD.cycles()).unwrap();
+    }
+
+    #[interrupt(resources = [EXTI])]
+    fn EXTI0() {
+        hprintln!("interrupt").unwrap();
+        resources.EXTI.pr.modify(|_, w| w.pr0().set_bit());
     }
 
     extern "C" {
