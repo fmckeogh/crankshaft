@@ -22,7 +22,7 @@ use stm32f4xx_hal::{
     },
     i2c::I2c,
     prelude::*,
-    stm32::{self as device, EXTI, I2C3},
+    stm32::{self as device, EXTI, I2C3, RCC, TIM11},
     timer::Timer,
 };
 
@@ -43,6 +43,8 @@ const APP: () = {
     static mut LED_BLUE: PD15<Output<PushPull>> = ();
 
     static mut EXTI: EXTI = ();
+    static mut TIM11: TIM11 = ();
+
     static mut RC_IN: PA3<Input<Floating>> = ();
 
     static mut VAL: u16 = 0;
@@ -67,6 +69,9 @@ const APP: () = {
                 .acr
                 .modify(|_, w| unsafe { w.latency().bits(0x11) });
 
+            device.RCC.apb2enr.modify(|_, w| w.tim11en().set_bit());
+            device.TIM11.psc.modify(|_, w| unsafe { w.psc().bits(64) });
+
             let rcc = device.RCC.constrain();
             rcc.cfgr
                 .sysclk(CPU_MHZ.mhz())
@@ -75,8 +80,6 @@ const APP: () = {
                 .hclk(CPU_MHZ.mhz())
                 .freeze()
         };
-
-        let tim2 = Timer::tim2(device.TIM2, 1.hz(), clocks);
 
         let gpioa = device.GPIOA.split();
         let _gpiob = device.GPIOB.split();
@@ -102,14 +105,14 @@ const APP: () = {
             device
                 .EXTI
                 .imr
-                .modify(|_, w| w.mr0().set_bit().mr3().set_bit());
+                .modify(|_, w| w.mr0().set_bit().mr2().set_bit().mr3().set_bit());
             // Set falling trigger selection for EXTI0 and EXTI3
             device
                 .EXTI
                 .ftsr
                 .modify(|_, w| w.tr0().set_bit().tr3().set_bit());
-            // Set rising trigger selection for EXTI3
-            device.EXTI.rtsr.modify(|_, w| w.tr3().set_bit());
+            // Set rising trigger selection for EXTI2
+            device.EXTI.rtsr.modify(|_, w| w.tr2().set_bit());
 
             rc_in
         };
@@ -138,6 +141,7 @@ const APP: () = {
         LED_BLUE = blue;
 
         EXTI = device.EXTI;
+        TIM11 = device.TIM11;
 
         RC_IN = rc_in;
     }
@@ -151,16 +155,16 @@ const APP: () = {
 
     #[task(priority = 2, schedule = [display_update], resources = [DISPLAY, VAL])]
     fn display_update() {
-        let mut val_local: u16 = 0;
+        let mut val: u16 = 0;
 
-        resources.VAL.lock(|val| {
-            val_local = *val;
+        resources.VAL.lock(|v| {
+            val = *v;
         });
 
         resources.DISPLAY.clear();
         resources
             .DISPLAY
-            .draw(Font6x8::render_str(&format!("val: {}", val_local)).into_iter());
+            .draw(Font6x8::render_str(&format!("val: {}", val)).into_iter());
         resources.DISPLAY.flush().unwrap();
 
         schedule
@@ -176,16 +180,22 @@ const APP: () = {
     }
     */
 
-    #[interrupt(priority = 3, resources = [EXTI, RC_IN, VAL])]
+    #[interrupt(priority = 3, resources = [EXTI, TIM11])]
+    fn EXTI2() {
+        // start timer
+        resources.TIM11.cr1.modify(|_, w| w.cen().enabled());
+
+        resources.EXTI.pr.modify(|_, w| w.pr2().set_bit());
+    }
+
+    #[interrupt(priority = 3, resources = [EXTI, TIM11, VAL])]
     fn EXTI3() {
-        match resources.RC_IN.is_high() {
-            true => {
-                *resources.VAL += 1;
-            }
-            false => {
-                *resources.VAL -= 1;
-            }
-        }
+        // stop timer and update val
+        resources.TIM11.cr1.modify(|_, w| w.cen().disabled());
+        let val = resources.TIM11.cnt.read().cnt().bits();
+        resources.TIM11.cnt.write(|w| unsafe { w.cnt().bits(0) });
+
+        *resources.VAL = val;
         resources.EXTI.pr.modify(|_, w| w.pr3().set_bit());
     }
 
