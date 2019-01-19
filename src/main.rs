@@ -1,68 +1,145 @@
 #![no_main]
 #![no_std]
+#![feature(alloc)]
+#![feature(lang_items)]
 
+#[macro_use]
+extern crate alloc;
 extern crate panic_halt;
 
-use cortex_m_semihosting::{hprintln};
+use alloc_cortex_m::CortexMHeap;
+use cortex_m_semihosting::hprintln;
+use embedded_graphics::{fonts::Font6x8, prelude::*};
 use rtfm::app;
+use ssd1306::interface::I2cInterface;
+use ssd1306::{prelude::*, Builder};
 use stm32f4xx_hal::{
-    gpio::{gpiod::PD13, Output, PushPull},
+    gpio::{
+        gpioa::{PA3, PA8},
+        gpioc::PC9,
+        gpiod::{PD12, PD13, PD14, PD15},
+        Alternate, Floating, Input, Output, PushPull, AF4,
+    },
+    i2c::I2c,
     prelude::*,
-    stm32::{self as device, EXTI},
+    stm32::{self as device, EXTI, I2C3},
+    timer::Timer,
 };
 
-const CLOCK_MHZ: u32 = 90;
-const PERIOD: u32 = 10_000_000;
+const CPU_MHZ: u32 = 90;
+const PERIOD: u32 = 9_000_000;
+
+#[global_allocator]
+static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
 
 #[app(device = stm32f4xx_hal::stm32)]
 const APP: () = {
-    static mut ON: bool = false;
-    static mut LED: PD13<Output<PushPull>> = ();
-    static mut EXTI: EXTI = ();
+    static mut DISPLAY: GraphicsMode<
+        I2cInterface<I2c<I2C3, (PA8<Alternate<AF4>>, PC9<Alternate<AF4>>)>>,
+    > = ();
+    static mut LED_GREEN: PD12<Output<PushPull>> = ();
+    static mut LED_ORANGE: PD13<Output<PushPull>> = ();
+    static mut LED_RED: PD14<Output<PushPull>> = ();
+    static mut LED_BLUE: PD15<Output<PushPull>> = ();
 
-    #[init(spawn = [blinky])]
+    static mut EXTI: EXTI = ();
+    static mut RC_IN: PA3<Input<Floating>> = ();
+
+    static mut VAL: u16 = 0;
+
+    #[init(spawn = [display_update])]
     fn init() {
         hprintln!("init").unwrap();
 
+        // Allocator
+        {
+            let start = cortex_m_rt::heap_start() as usize;
+            let size = 512; // in bytes
+            unsafe { ALLOCATOR.init(start, size) }
+        }
+
         let device: device::Peripherals = device;
 
-        device.PWR.cr.modify(|_, w| unsafe { w.vos().bits(0x11) });
-        device
-            .FLASH
-            .acr
-            .modify(|_, w| unsafe { w.latency().bits(0x11) });
+        let clocks = {
+            device.PWR.cr.modify(|_, w| unsafe { w.vos().bits(0x11) });
+            device
+                .FLASH
+                .acr
+                .modify(|_, w| unsafe { w.latency().bits(0x11) });
 
-        let rcc = device.RCC.constrain();
+            let rcc = device.RCC.constrain();
+            rcc.cfgr
+                .sysclk(CPU_MHZ.mhz())
+                .pclk1((CPU_MHZ / 2).mhz())
+                .pclk2(CPU_MHZ.mhz())
+                .hclk(CPU_MHZ.mhz())
+                .freeze()
+        };
 
-        let _clocks = rcc
-            .cfgr
-            .sysclk(CLOCK_MHZ.mhz())
-            .pclk1((CLOCK_MHZ / 2).mhz())
-            .pclk2(CLOCK_MHZ.mhz())
-            .hclk(CLOCK_MHZ.mhz())
-            .freeze();
+        let tim2 = Timer::tim2(device.TIM2, 1.hz(), clocks);
 
         let gpioa = device.GPIOA.split();
         let _gpiob = device.GPIOB.split();
-        let _gpioc = device.GPIOC.split();
+        let gpioc = device.GPIOC.split();
         let gpiod = device.GPIOD.split();
 
-        let led = gpiod.pd13.into_push_pull_output();
+        let mut green = gpiod.pd12.into_push_pull_output();
+        let orange = gpiod.pd13.into_push_pull_output();
+        let red = gpiod.pd14.into_push_pull_output();
+        let blue = gpiod.pd15.into_push_pull_output();
 
-        gpioa.pa0.into_floating_input();
-        device
-            .SYSCFG
-            .exticr1
-            .modify(|_, w| unsafe { w.exti0().bits(0x01) });
-        // Enable interrupt on EXTI0
-        device.EXTI.imr.modify(|_, w| w.mr0().set_bit());
-        // Set falling trigger selection for EXTI0
-        device.EXTI.ftsr.modify(|_, w| w.tr0().set_bit());
+        green.set_high();
 
-        spawn.blinky().unwrap();
+        // Enable interrupt on PA0 and PA1
+        let rc_in = {
+            gpioa.pa0.into_floating_input();
+            let rc_in = gpioa.pa3.into_floating_input();
+            device
+                .SYSCFG
+                .exticr1
+                .modify(|_, w| unsafe { w.exti0().bits(0x00).exti3().bits(0x00) });
+            // Enable interrupt on EXTI0 and 3
+            device
+                .EXTI
+                .imr
+                .modify(|_, w| w.mr0().set_bit().mr3().set_bit());
+            // Set falling trigger selection for EXTI0 and EXTI3
+            device
+                .EXTI
+                .ftsr
+                .modify(|_, w| w.tr0().set_bit().tr3().set_bit());
+            // Set rising trigger selection for EXTI3
+            device.EXTI.rtsr.modify(|_, w| w.tr3().set_bit());
 
-        LED = led;
+            rc_in
+        };
+
+        // Display setup
+        let display = {
+            let sda = gpioc.pc9.into_alternate_af4();
+            let scl = gpioa.pa8.into_alternate_af4();
+            let i2c = I2c::i2c3(device.I2C3, (scl, sda), 600.khz(), clocks);
+
+            let mut display: GraphicsMode<_> = Builder::new().connect_i2c(i2c).into();
+
+            display.init().unwrap();
+            display.clear();
+            display.flush().unwrap();
+
+            display
+        };
+
+        spawn.display_update().unwrap();
+
+        DISPLAY = display;
+        LED_GREEN = green;
+        LED_ORANGE = orange;
+        LED_RED = red;
+        LED_BLUE = blue;
+
         EXTI = device.EXTI;
+
+        RC_IN = rc_in;
     }
 
     #[idle]
@@ -72,24 +149,53 @@ const APP: () = {
         loop {}
     }
 
-    #[task(schedule = [blinky], resources = [ON, LED])]
-    fn blinky() {
-        match *resources.ON {
-            true => resources.LED.set_high(),
-            false => resources.LED.set_low(),
-        }
-        *resources.ON ^= true;
+    #[task(priority = 2, schedule = [display_update], resources = [DISPLAY, VAL])]
+    fn display_update() {
+        let mut val_local: u16 = 0;
 
-        schedule.blinky(scheduled + PERIOD.cycles()).unwrap();
+        resources.VAL.lock(|val| {
+            val_local = *val;
+        });
+
+        resources.DISPLAY.clear();
+        resources
+            .DISPLAY
+            .draw(Font6x8::render_str(&format!("val: {}", val_local)).into_iter());
+        resources.DISPLAY.flush().unwrap();
+
+        schedule
+            .display_update(scheduled + PERIOD.cycles())
+            .unwrap();
     }
 
-    #[interrupt(resources = [EXTI])]
+    /*
+    #[interrupt(priority = 3, resources = [EXTI, VAL])]
     fn EXTI0() {
-        hprintln!("interrupt").unwrap();
+        *resources.VAL += 1;
         resources.EXTI.pr.modify(|_, w| w.pr0().set_bit());
+    }
+    */
+
+    #[interrupt(priority = 3, resources = [EXTI, RC_IN, VAL])]
+    fn EXTI3() {
+        match resources.RC_IN.is_high() {
+            true => {
+                *resources.VAL += 1;
+            }
+            false => {
+                *resources.VAL -= 1;
+            }
+        }
+        resources.EXTI.pr.modify(|_, w| w.pr3().set_bit());
     }
 
     extern "C" {
         fn SPI1();
     }
 };
+
+#[lang = "oom"]
+#[no_mangle]
+pub fn rust_oom(layout: core::alloc::Layout) -> ! {
+    panic!("{:?}", layout);
+}
