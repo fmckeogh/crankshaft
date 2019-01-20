@@ -14,12 +14,7 @@ use rtfm::app;
 use ssd1306::interface::I2cInterface;
 use ssd1306::{prelude::*, Builder};
 use stm32f4xx_hal::{
-    gpio::{
-        gpioa::PA8,
-        gpioc::PC9,
-        gpiod::{PD13, PD14, PD15},
-        Alternate, Output, PushPull, AF4,
-    },
+    gpio::{gpioa::PA8, gpioc::PC9, gpiod::PD14, Alternate, Output, PushPull, AF4},
     i2c::I2c,
     prelude::*,
     stm32::{self as device, EXTI, I2C3, TIM11, TIM4},
@@ -36,9 +31,7 @@ const APP: () = {
     static mut DISPLAY: GraphicsMode<
         I2cInterface<I2c<I2C3, (PA8<Alternate<AF4>>, PC9<Alternate<AF4>>)>>,
     > = ();
-    static mut LED_ORANGE: PD13<Output<PushPull>> = ();
     static mut LED_RED: PD14<Output<PushPull>> = ();
-    static mut LED_BLUE: PD15<Output<PushPull>> = ();
 
     static mut EXTI: EXTI = ();
     static mut TIM4: TIM4 = ();
@@ -59,44 +52,28 @@ const APP: () = {
 
         let device: device::Peripherals = device;
 
+        // GPIO
         let gpioa = device.GPIOA.split();
         let _gpiob = device.GPIOB.split();
         let gpioc = device.GPIOC.split();
         let gpiod = device.GPIOD.split();
 
+        // Enable TIM4 and TIM11
+        device.RCC.apb2enr.modify(|_, w| w.tim11en().set_bit());
+        device.RCC.apb1enr.modify(|_, w| w.tim4en().set_bit());
+
+        // Set up TIM11 with prescaler of 64
+        device.TIM11.psc.modify(|_, w| unsafe { w.psc().bits(64) });
+
+        // Set core speed
         let clocks = {
+            // Power mode
             device.PWR.cr.modify(|_, w| unsafe { w.vos().bits(0x11) });
+            // Flash latency
             device
                 .FLASH
                 .acr
                 .modify(|_, w| unsafe { w.latency().bits(0x11) });
-
-            device.RCC.apb2enr.modify(|_, w| w.tim11en().set_bit());
-            device.RCC.apb1enr.modify(|_, w| w.tim4en().set_bit());
-
-            // Set up TIM11 with prescaler of 64
-            device.TIM11.psc.modify(|_, w| unsafe { w.psc().bits(64) });
-
-            // Configure PWM
-            gpiod.pd12.into_alternate_af2();
-            // freq
-            device.TIM4.arr.modify(|_, w| w.arr().bits(100));
-
-            device.TIM1.psc.modify(|_, w| unsafe { w.psc().bits(0) });
-            device
-                .TIM4
-                .cr1
-                .modify(|_, w| unsafe { w.dir().up().ckd().bits(1).arpe().set_bit() });
-            device
-                .TIM4
-                .ccmr1_output
-                .modify(|_, w| unsafe { w.oc1m().bits(0b111).oc1pe().set_bit() });
-            device.TIM4.egr.write(|w| w.ug().set_bit());
-            device
-                .TIM4
-                .ccer
-                .modify(|_, w| w.cc1p().bit(true).cc1e().set_bit());
-            device.TIM4.cr1.modify(|_, w| w.cen().enabled());
 
             let rcc = device.RCC.constrain();
             rcc.cfgr
@@ -107,7 +84,50 @@ const APP: () = {
                 .freeze()
         };
 
-        // Enable interrupt on PA0 and PA1
+        // PWM outputs
+        {
+            gpiod.pd12.into_alternate_af2();
+            gpiod.pd13.into_alternate_af2();
+            gpiod.pd15.into_alternate_af2();
+            device.TIM4.arr.modify(|_, w| w.arr().bits(100));
+            device.TIM1.psc.modify(|_, w| unsafe { w.psc().bits(0) });
+            device
+                .TIM4
+                .cr1
+                .modify(|_, w| unsafe { w.dir().up().ckd().bits(1).arpe().set_bit() });
+            device.TIM4.ccmr1_output.modify(|_, w| unsafe {
+                w.oc1m()
+                    .bits(0b111)
+                    .oc1pe()
+                    .set_bit()
+                    .oc2m()
+                    .bits(0b111)
+                    .oc2pe()
+                    .set_bit()
+            });
+            device
+                .TIM4
+                .ccmr2_output
+                .modify(|_, w| unsafe { w.oc4m().bits(0b111).oc4pe().set_bit() });
+            device.TIM4.egr.write(|w| w.ug().set_bit());
+            device.TIM4.ccer.modify(|_, w| {
+                w.cc1p()
+                    .bit(true)
+                    .cc1e()
+                    .set_bit()
+                    .cc2p()
+                    .bit(true)
+                    .cc2e()
+                    .set_bit()
+                    .cc4p()
+                    .bit(true)
+                    .cc4e()
+                    .set_bit()
+            });
+            device.TIM4.cr1.modify(|_, w| w.cen().enabled());
+        }
+
+        // Enable interrupts on PA0 and PA1
         {
             gpioa.pa0.into_floating_input();
             gpioa.pa2.into_floating_input();
@@ -115,7 +135,7 @@ const APP: () = {
             device.SYSCFG.exticr1.modify(|_, w| unsafe {
                 w.exti0().bits(0x00).exti2().bits(0x00).exti3().bits(0x00)
             });
-            // Enable interrupt on EXTI0 and 3
+            // Enable interrupts on EXTI0 and 3
             device
                 .EXTI
                 .imr
@@ -147,11 +167,7 @@ const APP: () = {
         spawn.display_update().unwrap();
 
         DISPLAY = display;
-
-        //LED_GREEN = gpiod.pd12.into_push_pull_output();
-        LED_ORANGE = gpiod.pd13.into_push_pull_output();
         LED_RED = gpiod.pd14.into_push_pull_output();
-        LED_BLUE = gpiod.pd15.into_push_pull_output();
 
         EXTI = device.EXTI;
         TIM4 = device.TIM4;
@@ -205,13 +221,19 @@ const APP: () = {
         // stop timer and update val
         resources.TIM11.cr1.modify(|_, w| w.cen().disabled());
         let raw = resources.TIM11.cnt.read().cnt().bits();
+        // reset counter - probably a better way to do this
         resources.TIM11.cnt.write(|w| unsafe { w.cnt().bits(0) });
 
+        // Calculate val
         let val = ((raw as f32 - 846.0) / 16.28) as u8;
 
+        // Write to PWM duty cycle registers and global variable
         resources.TIM4.ccr1.modify(|_, w| w.ccr1().bits(val.into()));
+        resources.TIM4.ccr2.modify(|_, w| w.ccr2().bits(val.into()));
+        resources.TIM4.ccr4.modify(|_, w| w.ccr4().bits(val.into()));
         *resources.VAL = val;
 
+        // Claer interrupt flag
         resources.EXTI.pr.modify(|_, w| w.pr3().set_bit());
     }
 
