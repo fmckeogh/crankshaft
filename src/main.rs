@@ -17,12 +17,12 @@ use stm32f4xx_hal::{
     gpio::{
         gpioa::PA8,
         gpioc::PC9,
-        gpiod::{PD12, PD13, PD14, PD15},
+        gpiod::{PD13, PD14, PD15},
         Alternate, Output, PushPull, AF4,
     },
     i2c::I2c,
     prelude::*,
-    stm32::{self as device, EXTI, I2C3, TIM11},
+    stm32::{self as device, EXTI, I2C3, TIM11, TIM4},
 };
 
 const CPU_MHZ: u32 = 90;
@@ -36,12 +36,12 @@ const APP: () = {
     static mut DISPLAY: GraphicsMode<
         I2cInterface<I2c<I2C3, (PA8<Alternate<AF4>>, PC9<Alternate<AF4>>)>>,
     > = ();
-    static mut LED_GREEN: PD12<Output<PushPull>> = ();
     static mut LED_ORANGE: PD13<Output<PushPull>> = ();
     static mut LED_RED: PD14<Output<PushPull>> = ();
     static mut LED_BLUE: PD15<Output<PushPull>> = ();
 
     static mut EXTI: EXTI = ();
+    static mut TIM4: TIM4 = ();
     static mut TIM11: TIM11 = ();
 
     static mut VAL: u8 = 0;
@@ -59,6 +59,11 @@ const APP: () = {
 
         let device: device::Peripherals = device;
 
+        let gpioa = device.GPIOA.split();
+        let _gpiob = device.GPIOB.split();
+        let gpioc = device.GPIOC.split();
+        let gpiod = device.GPIOD.split();
+
         let clocks = {
             device.PWR.cr.modify(|_, w| unsafe { w.vos().bits(0x11) });
             device
@@ -67,7 +72,31 @@ const APP: () = {
                 .modify(|_, w| unsafe { w.latency().bits(0x11) });
 
             device.RCC.apb2enr.modify(|_, w| w.tim11en().set_bit());
+            device.RCC.apb1enr.modify(|_, w| w.tim4en().set_bit());
+
+            // Set up TIM11 with prescaler of 64
             device.TIM11.psc.modify(|_, w| unsafe { w.psc().bits(64) });
+
+            // Configure PWM
+            gpiod.pd12.into_alternate_af2();
+            // freq
+            device.TIM4.arr.modify(|_, w| w.arr().bits(100));
+
+            device.TIM1.psc.modify(|_, w| unsafe { w.psc().bits(0) });
+            device
+                .TIM4
+                .cr1
+                .modify(|_, w| unsafe { w.dir().up().ckd().bits(1).arpe().set_bit() });
+            device
+                .TIM4
+                .ccmr1_output
+                .modify(|_, w| unsafe { w.oc1m().bits(0b111).oc1pe().set_bit() });
+            device.TIM4.egr.write(|w| w.ug().set_bit());
+            device
+                .TIM4
+                .ccer
+                .modify(|_, w| w.cc1p().bit(true).cc1e().set_bit());
+            device.TIM4.cr1.modify(|_, w| w.cen().enabled());
 
             let rcc = device.RCC.constrain();
             rcc.cfgr
@@ -77,18 +106,6 @@ const APP: () = {
                 .hclk(CPU_MHZ.mhz())
                 .freeze()
         };
-
-        let gpioa = device.GPIOA.split();
-        let _gpiob = device.GPIOB.split();
-        let gpioc = device.GPIOC.split();
-        let gpiod = device.GPIOD.split();
-
-        let mut green = gpiod.pd12.into_push_pull_output();
-        let orange = gpiod.pd13.into_push_pull_output();
-        let red = gpiod.pd14.into_push_pull_output();
-        let blue = gpiod.pd15.into_push_pull_output();
-
-        green.set_high();
 
         // Enable interrupt on PA0 and PA1
         {
@@ -130,12 +147,14 @@ const APP: () = {
         spawn.display_update().unwrap();
 
         DISPLAY = display;
-        LED_GREEN = green;
-        LED_ORANGE = orange;
-        LED_RED = red;
-        LED_BLUE = blue;
+
+        //LED_GREEN = gpiod.pd12.into_push_pull_output();
+        LED_ORANGE = gpiod.pd13.into_push_pull_output();
+        LED_RED = gpiod.pd14.into_push_pull_output();
+        LED_BLUE = gpiod.pd15.into_push_pull_output();
 
         EXTI = device.EXTI;
+        TIM4 = device.TIM4;
         TIM11 = device.TIM11;
     }
 
@@ -181,14 +200,17 @@ const APP: () = {
         resources.EXTI.pr.modify(|_, w| w.pr2().set_bit());
     }
 
-    #[interrupt(priority = 3, resources = [EXTI, TIM11, VAL])]
+    #[interrupt(priority = 3, resources = [EXTI, TIM4, TIM11, VAL])]
     fn EXTI3() {
         // stop timer and update val
         resources.TIM11.cr1.modify(|_, w| w.cen().disabled());
         let raw = resources.TIM11.cnt.read().cnt().bits();
         resources.TIM11.cnt.write(|w| unsafe { w.cnt().bits(0) });
 
-        *resources.VAL = ((raw as f32 - 846.0) / 16.28) as u8;
+        let val = ((raw as f32 - 846.0) / 16.28) as u8;
+
+        resources.TIM4.ccr1.modify(|_, w| w.ccr1().bits(val.into()));
+        *resources.VAL = val;
 
         resources.EXTI.pr.modify(|_, w| w.pr3().set_bit());
     }
