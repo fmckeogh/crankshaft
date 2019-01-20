@@ -15,19 +15,18 @@ use ssd1306::interface::I2cInterface;
 use ssd1306::{prelude::*, Builder};
 use stm32f4xx_hal::{
     gpio::{
-        gpioa::{PA3, PA8},
+        gpioa::PA8,
         gpioc::PC9,
         gpiod::{PD12, PD13, PD14, PD15},
-        Alternate, Floating, Input, Output, PushPull, AF4,
+        Alternate, Output, PushPull, AF4,
     },
     i2c::I2c,
     prelude::*,
-    stm32::{self as device, EXTI, I2C3, RCC, TIM11},
-    timer::Timer,
+    stm32::{self as device, EXTI, I2C3, TIM11},
 };
 
 const CPU_MHZ: u32 = 90;
-const PERIOD: u32 = 9_000_000;
+const PERIOD: u32 = 5_000_000;
 
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
@@ -45,9 +44,7 @@ const APP: () = {
     static mut EXTI: EXTI = ();
     static mut TIM11: TIM11 = ();
 
-    static mut RC_IN: PA3<Input<Floating>> = ();
-
-    static mut VAL: u16 = 0;
+    static mut VAL: u8 = 0;
 
     #[init(spawn = [display_update])]
     fn init() {
@@ -94,13 +91,13 @@ const APP: () = {
         green.set_high();
 
         // Enable interrupt on PA0 and PA1
-        let rc_in = {
+        {
             gpioa.pa0.into_floating_input();
-            let rc_in = gpioa.pa3.into_floating_input();
-            device
-                .SYSCFG
-                .exticr1
-                .modify(|_, w| unsafe { w.exti0().bits(0x00).exti3().bits(0x00) });
+            gpioa.pa2.into_floating_input();
+            gpioa.pa3.into_floating_input();
+            device.SYSCFG.exticr1.modify(|_, w| unsafe {
+                w.exti0().bits(0x00).exti2().bits(0x00).exti3().bits(0x00)
+            });
             // Enable interrupt on EXTI0 and 3
             device
                 .EXTI
@@ -113,8 +110,6 @@ const APP: () = {
                 .modify(|_, w| w.tr0().set_bit().tr3().set_bit());
             // Set rising trigger selection for EXTI2
             device.EXTI.rtsr.modify(|_, w| w.tr2().set_bit());
-
-            rc_in
         };
 
         // Display setup
@@ -142,8 +137,6 @@ const APP: () = {
 
         EXTI = device.EXTI;
         TIM11 = device.TIM11;
-
-        RC_IN = rc_in;
     }
 
     #[idle]
@@ -155,7 +148,7 @@ const APP: () = {
 
     #[task(priority = 2, schedule = [display_update], resources = [DISPLAY, VAL])]
     fn display_update() {
-        let mut val: u16 = 0;
+        let mut val = 0;
 
         resources.VAL.lock(|v| {
             val = *v;
@@ -164,7 +157,7 @@ const APP: () = {
         resources.DISPLAY.clear();
         resources
             .DISPLAY
-            .draw(Font6x8::render_str(&format!("val: {}", val)).into_iter());
+            .draw(Font6x8::render_str(&format!("val: {}%", val)).into_iter());
         resources.DISPLAY.flush().unwrap();
 
         schedule
@@ -192,10 +185,11 @@ const APP: () = {
     fn EXTI3() {
         // stop timer and update val
         resources.TIM11.cr1.modify(|_, w| w.cen().disabled());
-        let val = resources.TIM11.cnt.read().cnt().bits();
+        let raw = resources.TIM11.cnt.read().cnt().bits();
         resources.TIM11.cnt.write(|w| unsafe { w.cnt().bits(0) });
 
-        *resources.VAL = val;
+        *resources.VAL = ((raw as f32 - 846.0) / 16.28) as u8;
+
         resources.EXTI.pr.modify(|_, w| w.pr3().set_bit());
     }
 
