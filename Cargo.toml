@@ -11,19 +11,19 @@ cortex-m = "0.5.8"
 cortex-m-rt = "0.6.7"
 cortex-m-semihosting = "0.3.2"
 panic-halt = "0.2.0"
-stm32f4xx-hal = { git = "https://github.com/stm32-rs/stm32f4xx-hal.git", rev = "e297ceb", features = ["rt", "stm32f411"] }
+stm32f4xx-hal = { git = "https://github.com/stm32-rs/stm32f4xx-hal.git", rev = "7c7149c", features = ["rt", "stm32f411"] }
 cortex-m-rtfm = { version = "0.4.0", features = ["timer-queue"] }
 ssd1306 = "0.2.2"
 embedded-graphics = "0.4.5"
 alloc-cortex-m = "0.3.5"
 
-# Broken don't use right now
+# Broken don't use right now?
 [profile.release]
 # https://rust-embedded.github.io/book/unsorted/speed-vs-size.html
-opt-level = 3 # should be 3 but only 0 works for some reason :(
+opt-level = 3
 codegen-units = 1 # better optimizations when 1
 debug = true # symbols are nice and they don't increase the size on flash
 lto = true # better optimizations
 
-[profile.dev.overrides."*"]
+[profile.dev]
 opt-level = 3

@@ -20,7 +20,7 @@ use stm32f4xx_hal::{
     stm32::{self as device, EXTI, I2C3, TIM11, TIM4},
 };
 
-const CPU_MHZ: u32 = 90;
+const CPU_HZ: u32 = 100_000_000;
 const PERIOD: u32 = 5_000_000;
 
 #[global_allocator]
@@ -59,10 +59,12 @@ const APP: () = {
         let gpiod = device.GPIOD.split();
 
         // Enable TIM4 and TIM11
-        device.RCC.apb2enr.modify(|_, w| w.tim11en().set_bit());
-        device.RCC.apb1enr.modify(|_, w| w.tim4en().set_bit());
+        {
+            device.RCC.apb1enr.modify(|_, w| w.tim4en().set_bit());
+            device.RCC.apb2enr.modify(|_, w| w.tim11en().set_bit());
+        }
 
-        // Set up TIM11 with prescaler of 64
+        // Set TIM11 prescaler to 64
         device.TIM11.psc.modify(|_, w| unsafe { w.psc().bits(64) });
 
         // Set core speed
@@ -77,10 +79,10 @@ const APP: () = {
 
             let rcc = device.RCC.constrain();
             rcc.cfgr
-                .sysclk(CPU_MHZ.mhz())
-                .pclk1((CPU_MHZ / 2).mhz())
-                .pclk2(CPU_MHZ.mhz())
-                .hclk(CPU_MHZ.mhz())
+                .sysclk(CPU_HZ.hz())
+                .pclk1((CPU_HZ / 2).hz())
+                .pclk2(CPU_HZ.hz())
+                .hclk(CPU_HZ.hz())
                 .freeze()
         };
 
@@ -89,8 +91,11 @@ const APP: () = {
             gpiod.pd12.into_alternate_af2();
             gpiod.pd13.into_alternate_af2();
             gpiod.pd15.into_alternate_af2();
+
+            // Set prescaler to 1
+            device.TIM4.psc.modify(|_, w| unsafe { w.psc().bits(1) });
+
             device.TIM4.arr.modify(|_, w| w.arr().bits(100));
-            device.TIM1.psc.modify(|_, w| unsafe { w.psc().bits(0) });
             device
                 .TIM4
                 .cr1
@@ -127,15 +132,19 @@ const APP: () = {
             device.TIM4.cr1.modify(|_, w| w.cen().enabled());
         }
 
-        // Enable interrupts on PA0 and PA1
+        // Enable interrupts on PA0, PA2 and PA3
         {
+            // User pushbutton connected to PA0
             gpioa.pa0.into_floating_input();
+            // RC_IN connected to both PA2 and PA3
             gpioa.pa2.into_floating_input();
             gpioa.pa3.into_floating_input();
+
+            // Set to GPIOA on all EXTI0/2/3
             device.SYSCFG.exticr1.modify(|_, w| unsafe {
                 w.exti0().bits(0x00).exti2().bits(0x00).exti3().bits(0x00)
             });
-            // Enable interrupts on EXTI0 and 3
+            // Enable interrupts on EXTI0/2/3
             device
                 .EXTI
                 .imr
@@ -153,7 +162,7 @@ const APP: () = {
         let display = {
             let sda = gpioc.pc9.into_alternate_af4();
             let scl = gpioa.pa8.into_alternate_af4();
-            let i2c = I2c::i2c3(device.I2C3, (scl, sda), 600.khz(), clocks);
+            let i2c = I2c::i2c3(device.I2C3, (scl, sda), 1000.khz(), clocks);
 
             let mut display: GraphicsMode<_> = Builder::new().connect_i2c(i2c).into();
 
@@ -184,7 +193,6 @@ const APP: () = {
     #[task(priority = 2, schedule = [display_update], resources = [DISPLAY, VAL])]
     fn display_update() {
         let mut val = 0;
-
         resources.VAL.lock(|v| {
             val = *v;
         });
@@ -210,7 +218,7 @@ const APP: () = {
 
     #[interrupt(priority = 3, resources = [EXTI, TIM11])]
     fn EXTI2() {
-        // start timer
+        // Start timer
         resources.TIM11.cr1.modify(|_, w| w.cen().enabled());
 
         resources.EXTI.pr.modify(|_, w| w.pr2().set_bit());
@@ -218,14 +226,19 @@ const APP: () = {
 
     #[interrupt(priority = 3, resources = [EXTI, TIM4, TIM11, VAL])]
     fn EXTI3() {
-        // stop timer and update val
+        // Stop timer and update val
         resources.TIM11.cr1.modify(|_, w| w.cen().disabled());
         let raw = resources.TIM11.cnt.read().cnt().bits();
-        // reset counter - probably a better way to do this
+        // Reset counter - probably a better way to do this
         resources.TIM11.cnt.write(|w| unsafe { w.cnt().bits(0) });
 
         // Calculate val
-        let val = ((raw as f32 - 846.0) / 16.28) as u8;
+        let val = {
+            let max = 2755.0;
+            let min = 941.0;
+            let range = max - min;
+            (((raw as f32 - min) * 100.0) / range) as u8
+        };
 
         // Write to PWM duty cycle registers and global variable
         resources.TIM4.ccr1.modify(|_, w| w.ccr1().bits(val.into()));
@@ -233,7 +246,7 @@ const APP: () = {
         resources.TIM4.ccr4.modify(|_, w| w.ccr4().bits(val.into()));
         *resources.VAL = val;
 
-        // Claer interrupt flag
+        // Clear flag
         resources.EXTI.pr.modify(|_, w| w.pr3().set_bit());
     }
 
