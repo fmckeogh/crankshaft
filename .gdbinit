@@ -16,6 +16,15 @@ set print asm-demangle on
 
 monitor arm semihosting enable
 
+monitor tpiu config internal itm.fifo uart off 100000000
+
+monitor itm port 0 on
+
+echo clear EXCEVTENA; set PCSAMPLENA\n
+monitor mmw 0xE0001000 4096 65536
+echo enable CYCCNT; set POSTINIT / POSTRESET to 3\n
+monitor mmw 0xE0001000 103 510
+
 load
 
 continue

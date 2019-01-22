@@ -41,7 +41,7 @@ const APP: () = {
 
     #[init(spawn = [display_update])]
     fn init() {
-        hprintln!("init").unwrap();
+        hprintln!("init...").unwrap();
 
         // Allocator
         {
@@ -175,19 +175,14 @@ const APP: () = {
 
         spawn.display_update().unwrap();
 
+        hprintln!("init complete").unwrap();
+
         DISPLAY = display;
         LED_RED = gpiod.pd14.into_push_pull_output();
 
         EXTI = device.EXTI;
         TIM4 = device.TIM4;
         TIM11 = device.TIM11;
-    }
-
-    #[idle]
-    fn idle() -> ! {
-        hprintln!("idle").unwrap();
-
-        loop {}
     }
 
     #[task(priority = 2, schedule = [display_update], resources = [DISPLAY, VAL])]
