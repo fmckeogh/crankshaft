@@ -2,7 +2,7 @@ define hook-quit
     set confirm off
 end
 
-target extended-remote :3333
+target remote :3333
 
 # print demangled symbols
 set print asm-demangle on
@@ -16,14 +16,14 @@ set print asm-demangle on
 
 monitor arm semihosting enable
 
-monitor tpiu config internal itm.fifo uart off 100000000
+monitor tpiu config internal itm.fifo uart off 50000000
 
 monitor itm port 0 on
 
-echo clear EXCEVTENA; set PCSAMPLENA\n
-monitor mmw 0xE0001000 4096 65536
-echo enable CYCCNT; set POSTINIT / POSTRESET to 3\n
-monitor mmw 0xE0001000 103 510
+#echo clear EXCEVTENA; set PCSAMPLENA\n
+#monitor mmw 0xE0001000 4096 65536
+#echo enable CYCCNT; set POSTINIT / POSTRESET to 3\n
+#monitor mmw 0xE0001000 103 510
 
 load
 
