@@ -40,7 +40,7 @@ const KB: u16 = 1024;
 
 /* Network configuration */
 const MAC: mac::Addr = mac::Addr([0x20, 0x18, 0x03, 0x01, 0x00, 0x00]);
-const IP: ipv4::Addr = ipv4::Addr([192, 168, 1, 33]);
+const IP: ipv4::Addr = ipv4::Addr([192, 168, 1, 2]);
 
 // LED resource
 #[derive(Deserialize, Serialize)]
@@ -79,46 +79,46 @@ fn main() -> ! {
     let _stim = &mut cp.ITM.stim[0];
 
     // LED
-    let mut gpioc = dp.GPIOC.split();
-    let mut led = gpioc.pc13.into_push_pull_output();
+    let mut gpioc = dp.GPIOD.split();
+    let mut led = gpioc.pd14.into_push_pull_output();
     // turn the LED off during initialization
-    led.set_high();
-
-    // SPI
-    let mut rst = gpioa.pa3.into_push_pull_output();
-    rst.set_high();
-    let mut ncs = gpioa.pa4.into_push_pull_output();
-    ncs.set_high();
-    let spi = {
-        let sck = gpioa.pa5.into_alternate_af5();
-        let miso = gpioa.pa6.into_alternate_af5();
-        let mosi = gpioa.pa7.into_alternate_af5();
-
-        Spi::spi1(
-            dp.SPI1,
-            (sck, miso, mosi),
-            enc28j60::MODE,
-            16_000_000.hz(),
-            clocks,
-        )
-    };
+    led.set_low();
 
     // ENC28J60
     let mut delay = Delay::new(cp.SYST, clocks);
-    let mut enc28j60 = Enc28j60::new(
-        spi,
-        ncs,
-        enc28j60::Unconnected,
-        rst,
-        &mut delay,
-        7 * KB,
-        MAC.0,
-    )
-    .ok()
-    .unwrap();
+    let mut enc28j60 = {
+        let mut rst = gpioa.pa3.into_push_pull_output();
+        rst.set_high();
+        let mut ncs = gpioa.pa4.into_push_pull_output();
+        ncs.set_high();
+        let spi = {
+            let sck = gpioa.pa5.into_alternate_af5();
+            let miso = gpioa.pa6.into_alternate_af5();
+            let mosi = gpioa.pa7.into_alternate_af5();
+
+            Spi::spi1(
+                dp.SPI1,
+                (sck, miso, mosi),
+                enc28j60::MODE,
+                8_000_000.hz(),
+                clocks,
+            )
+        };
+
+        Enc28j60::new(
+            spi,
+            ncs,
+            enc28j60::Unconnected,
+            rst,
+            &mut delay,
+            7 * KB,
+            MAC.0,
+        )
+        .unwrap()
+    };
 
     // LED on after initialization
-    led.set_low();
+    led.set_high();
 
     // FIXME some frames are lost when sending right after initialization
     delay.delay_ms(100_u8);

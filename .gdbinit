@@ -2,6 +2,8 @@ define hook-quit
     set confirm off
 end
 
+set pagination off
+
 target remote :3333
 
 # print demangled symbols

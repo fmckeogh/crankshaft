@@ -16,6 +16,7 @@ heapless = "0.4.1"
 m = "0.1.1"
 mfrc522 = "0.2.0"
 serde_derive = "1.0.87"
+cortex-m-rtfm = "0.4.2"
 
 [dependencies.embedded-hal]
 features = ["unproven"]
