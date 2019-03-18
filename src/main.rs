@@ -24,9 +24,9 @@ extern crate stm32f4xx_hal as hal;
 extern crate panic_itm;
 
 use core::convert::TryInto;
+use cortex_m::asm;
 use embedded_hal::digital::StatefulOutputPin;
-use enc28j60::Enc28j60;
-use hal::delay::Delay;
+use enc28j60::{Enc28j60, NextPacket};
 use hal::prelude::*;
 use hal::spi::Spi;
 use hal::stm32 as pac;
@@ -34,6 +34,7 @@ use heapless::consts::*;
 use heapless::FnvIndexMap;
 use jnet::{arp, coap, ether, icmp, ipv4, mac, udp, Buffer};
 use rt::{entry, exception, ExceptionFrame};
+use rtfm::app;
 
 /* Constants */
 const KB: u16 = 1024;
@@ -50,85 +51,121 @@ struct Led {
 
 const CPU_HZ: u32 = 50_000_000;
 
-#[entry]
-fn main() -> ! {
-    let mut cp = cortex_m::Peripherals::take().unwrap();
-    let dp = pac::Peripherals::take().unwrap();
+#[app(device = stm32f4xx_hal::stm32)]
+const APP: () = {
+    static mut ITM: cortex_m::peripheral::ITM = ();
+    static mut EXTI: pac::EXTI = ();
+    static mut LED: hal::gpio::gpiod::PD14<hal::gpio::Output<hal::gpio::PushPull>> = ();
+    static mut ETH: enc28j60::Enc28j60<
+        hal::spi::Spi<
+            hal::stm32::SPI1,
+            (
+                hal::gpio::gpioa::PA5<hal::gpio::Alternate<hal::gpio::AF5>>,
+                hal::gpio::gpioa::PA6<hal::gpio::Alternate<hal::gpio::AF5>>,
+                hal::gpio::gpioa::PA7<hal::gpio::Alternate<hal::gpio::AF5>>,
+            ),
+        >,
+        hal::gpio::gpioa::PA4<hal::gpio::Output<hal::gpio::PushPull>>,
+        hal::gpio::gpioa::PA0<hal::gpio::Input<hal::gpio::Floating>>,
+        hal::gpio::gpioa::PA3<hal::gpio::Output<hal::gpio::PushPull>>,
+    > = ();
 
-    let mut gpioa = dp.GPIOA.split();
+    static mut CACHE: FnvIndexMap<jnet::ipv4::Addr, jnet::mac::Addr, U8> = ();
 
-    //let clocks = dp.RCC.constrain().cfgr.freeze();
+    #[init]
+    fn init() {
+        let mut core: rtfm::Peripherals = core;
+        let device: pac::Peripherals = device;
+        let mut gpioa = device.GPIOA.split();
+        let mut gpiod = device.GPIOD.split();
 
-    let clocks = {
-        // Power mode
-        dp.PWR.cr.modify(|_, w| unsafe { w.vos().bits(0x11) });
-        // Flash latency
-        dp.FLASH
-            .acr
-            .modify(|_, w| unsafe { w.latency().bits(0x11) });
+        // Set core speed
+        let clocks = {
+            // Power mode
+            device.PWR.cr.modify(|_, w| unsafe { w.vos().bits(0x11) });
+            // Flash latency
+            device
+                .FLASH
+                .acr
+                .modify(|_, w| unsafe { w.latency().bits(0x11) });
 
-        let rcc = dp.RCC.constrain();
-        rcc.cfgr
-            .sysclk(CPU_HZ.hz())
-            .pclk1((CPU_HZ / 2).hz())
-            .pclk2(CPU_HZ.hz())
-            .hclk(CPU_HZ.hz())
-            .freeze()
-    };
-
-    let _stim = &mut cp.ITM.stim[0];
-
-    // LED
-    let mut gpioc = dp.GPIOD.split();
-    let mut led = gpioc.pd14.into_push_pull_output();
-    // turn the LED off during initialization
-    led.set_low();
-
-    // ENC28J60
-    let mut delay = Delay::new(cp.SYST, clocks);
-    let mut enc28j60 = {
-        let mut rst = gpioa.pa3.into_push_pull_output();
-        rst.set_high();
-        let mut ncs = gpioa.pa4.into_push_pull_output();
-        ncs.set_high();
-        let spi = {
-            let sck = gpioa.pa5.into_alternate_af5();
-            let miso = gpioa.pa6.into_alternate_af5();
-            let mosi = gpioa.pa7.into_alternate_af5();
-
-            Spi::spi1(
-                dp.SPI1,
-                (sck, miso, mosi),
-                enc28j60::MODE,
-                8_000_000.hz(),
-                clocks,
-            )
+            let rcc = device.RCC.constrain();
+            rcc.cfgr
+                .sysclk(CPU_HZ.hz())
+                .pclk1((CPU_HZ / 2).hz())
+                .pclk2(CPU_HZ.hz())
+                .hclk(CPU_HZ.hz())
+                .freeze()
         };
 
-        Enc28j60::new(
-            spi,
-            ncs,
-            enc28j60::Unconnected,
-            rst,
-            &mut delay,
-            7 * KB,
-            MAC.0,
-        )
-        .unwrap()
-    };
+        // Enable interrupts
+        // User enc28j60 INT connected to PA0
+        let int = gpioa.pa0.into_floating_input();
+        {
+            // Set EXTI0 to GPIOA
+            device
+                .SYSCFG
+                .exticr1
+                .modify(|_, w| unsafe { w.exti0().bits(0x00) });
 
-    // LED on after initialization
-    led.set_high();
+            // Enable interrupts on EXTI0
+            device.EXTI.imr.modify(|_, w| w.mr0().set_bit());
 
-    // FIXME some frames are lost when sending right after initialization
-    delay.delay_ms(100_u8);
+            // Set falling trigger selection for EXTI0
+            device.EXTI.ftsr.modify(|_, w| w.tr0().set_bit());
+        }
 
-    let mut cache = FnvIndexMap::<_, _, U8>::new();
+        let mut itm = core.ITM;
+        let mut stim = &mut itm.stim[0];
+        iprintln!(stim, "\ninit start");
 
-    let mut buf = [0u8; 128];
-    iprintln!(_stim, "init complete");
-    loop {
-        match enc28j60.next_packet() {
+        // turn the LED off during initialization
+        let mut led = gpiod.pd14.into_push_pull_output();
+        led.set_low();
+
+        // Ethernet
+        let mut eth = {
+            let mut rst = gpioa.pa3.into_push_pull_output();
+            rst.set_high();
+            let mut ncs = gpioa.pa4.into_push_pull_output();
+            ncs.set_high();
+
+            let spi = {
+                let sck = gpioa.pa5.into_alternate_af5();
+                let miso = gpioa.pa6.into_alternate_af5();
+                let mosi = gpioa.pa7.into_alternate_af5();
+
+                Spi::spi1(
+                    device.SPI1,
+                    (sck, miso, mosi),
+                    enc28j60::MODE,
+                    8_000_000.hz(),
+                    clocks,
+                )
+            };
+
+            let mut delay = AsmDelay {};
+
+            Enc28j60::new(spi, ncs, int, rst, &mut delay, 7 * KB, MAC.0).unwrap()
+        };
+
+        iprintln!(stim, "init done");
+
+        ITM = itm;
+        EXTI = device.EXTI;
+        LED = led;
+        ETH = eth;
+
+        CACHE = FnvIndexMap::<ipv4::Addr, mac::Addr, U8>::new();
+    }
+
+    #[interrupt(resources = [ITM, EXTI, LED, ETH, CACHE])]
+    fn EXTI0() {
+        let _stim = &mut resources.ITM.stim[0];
+        iprintln!(_stim, "EXTI0");
+
+        let mut buf = [0u8; 128];
+        match resources.ETH.next_packet() {
             Ok(Some(packet)) => {
                 if packet.len() > 128 {
                     panic!("too big");
@@ -151,7 +188,10 @@ fn main() -> ! {
                                         iprintln!(_stim, "** {:?}", arp);
 
                                         if !arp.is_a_probe() {
-                                            cache.insert(arp.get_spa(), arp.get_sha()).ok();
+                                            resources
+                                                .CACHE
+                                                .insert(arp.get_spa(), arp.get_sha())
+                                                .ok();
                                         }
 
                                         // are they asking for us?
@@ -175,7 +215,7 @@ fn main() -> ! {
                                             iprintln!(_stim, "* {:?}", eth);
 
                                             iprintln!(_stim, "Tx({})", eth.as_bytes().len());
-                                            enc28j60.transmit(eth.as_bytes()).ok().unwrap();
+                                            resources.ETH.transmit(eth.as_bytes()).ok().unwrap();
                                         }
                                     }
                                     Err(_arp) => {
@@ -193,7 +233,7 @@ fn main() -> ! {
                                 let ip_src = ip.get_source();
 
                                 if !mac_src.is_broadcast() {
-                                    cache.insert(ip_src, mac_src).ok();
+                                    resources.CACHE.insert(ip_src, mac_src).ok();
                                 }
 
                                 match ip.get_protocol() {
@@ -216,12 +256,18 @@ fn main() -> ! {
                                                 iprintln!(_stim, "** {:?}", _ip);
 
                                                 // update the Ethernet header
-                                                eth.set_destination(*cache.get(&ip_src).unwrap());
+                                                eth.set_destination(
+                                                    *resources.CACHE.get(&ip_src).unwrap(),
+                                                );
                                                 eth.set_source(MAC);
                                                 iprintln!(_stim, "* {:?}", eth);
 
                                                 iprintln!(_stim, "Tx({})", eth.as_bytes().len());
-                                                enc28j60.transmit(eth.as_bytes()).ok().unwrap();
+                                                resources
+                                                    .ETH
+                                                    .transmit(eth.as_bytes())
+                                                    .ok()
+                                                    .unwrap();
                                             }
                                         } else {
                                             iprintln!(_stim, "Err(C)");
@@ -267,10 +313,15 @@ fn main() -> ! {
                                                                         coap.payload(),
                                                                     )
                                                                 {
+                                                                    iprintln!(
+                                                                        _stim,
+                                                                        "JSON LED {:?}",
+                                                                        json.led
+                                                                    );
                                                                     if json.led {
-                                                                        led.set_low();
+                                                                        resources.LED.set_low();
                                                                     } else {
-                                                                        led.set_high();
+                                                                        resources.LED.set_high();
                                                                     }
                                                                     resp = coap::Response::Changed;
                                                                 }
@@ -283,7 +334,7 @@ fn main() -> ! {
 
                                                     let mut eth = ether::Frame::new(buf);
                                                     eth.set_destination(
-                                                        *cache.get(&ip_src).unwrap(),
+                                                        *resources.CACHE.get(&ip_src).unwrap(),
                                                     );
                                                     eth.set_source(MAC);
 
@@ -306,10 +357,7 @@ fn main() -> ! {
                                                                             [u8; 16],
                                                                             _,
                                                                         >(
-                                                                            &Led {
-                                                                                led: led
-                                                                                    .is_set_low(),
-                                                                            },
+                                                                            &Led { led: false }
                                                                         )
                                                                         .unwrap(),
                                                                     );
@@ -334,7 +382,7 @@ fn main() -> ! {
 
                                                     let bytes = eth.as_bytes();
                                                     iprintln!(_stim, "Tx({})", bytes.len());
-                                                    enc28j60.transmit(bytes).ok().unwrap();
+                                                    resources.ETH.transmit(bytes).ok().unwrap();
                                                 }
                                             }
                                         }
@@ -351,18 +399,17 @@ fn main() -> ! {
                     iprintln!(_stim, "Err(E)");
                 }
             }
-            Err(e) => iprintln!(_stim, "Err(E)"),
+            Err(e) => iprintln!(_stim, "Err({:?})", e),
             _ => (),
         }
+        resources.EXTI.pr.modify(|_, w| w.pr0().set_bit());
     }
-}
+};
 
-#[exception]
-fn HardFault(ef: &ExceptionFrame) -> ! {
-    panic!("{:#?}", ef);
-}
+struct AsmDelay {}
 
-#[exception]
-fn DefaultHandler(irqn: i16) {
-    panic!("Unhandled exception (IRQn = {})", irqn);
+impl embedded_hal::blocking::delay::DelayMs<u8> for AsmDelay {
+    fn delay_ms(&mut self, ms: u8) {
+        asm::delay((ms as u32) * (CPU_HZ / 10));
+    }
 }

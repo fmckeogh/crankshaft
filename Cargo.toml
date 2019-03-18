@@ -10,11 +10,10 @@ nb = "0.1.1"
 cortex-m-rt = "0.6.7"
 stm32f4xx-hal = { version = "0.3.0", features = ["rt", "stm32f411"] }
 panic-itm = "0.4.0"
-# cortex-m-rtfm = "0.3.1"
-enc28j60 = { git = "https://github.com/japaric/enc28j60.git", rev = "694e21f" }
+#enc28j60 = { git = "https://github.com/japaric/enc28j60.git", rev = "694e21f" }
+enc28j60 = { path = "/Users/ferdiamckeogh/Downloads/enc28j60" }
 heapless = "0.4.1"
 m = "0.1.1"
-mfrc522 = "0.2.0"
 serde_derive = "1.0.87"
 cortex-m-rtfm = "0.4.2"
 
