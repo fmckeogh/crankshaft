@@ -101,7 +101,7 @@ dependencies = [
  "enc28j60 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "panic-semihosting 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "smoltcp 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "stm32f1xx-hal 0.2.1 (git+https://github.com/chocol4te/stm32f1xx-hal)",
+ "stm32f1xx-hal 0.2.1 (git+https://github.com/stm32-rs/stm32f1xx-hal.git?rev=d66f170)",
 ]
 
 [[package]]
@@ -279,7 +279,7 @@ dependencies = [
 [[package]]
 name = "stm32f1xx-hal"
 version = "0.2.1"
-source = "git+https://github.com/chocol4te/stm32f1xx-hal#88b6c96499330aba971a84821ba98e1e95c02f4e"
+source = "git+https://github.com/stm32-rs/stm32f1xx-hal.git?rev=d66f170#d66f170bac185dbbf07a88c2ff0a42f4d0b46ac5"
 dependencies = [
  "cast 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "cortex-m 0.5.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -362,7 +362,7 @@ dependencies = [
 "checksum smoltcp 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fef582369edb298c6c41319a544ca9c4e83622f226055ccfcb35974fbb55ed34"
 "checksum stable_deref_trait 1.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "dba1a27d3efae4351c8051072d619e3ade2820635c3958d826bfea39d59b54c8"
 "checksum stm32f1 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "5c9a197094ef680c79c5018701f0c03f0dc673cbf4a0df944371d3f83c71161d"
-"checksum stm32f1xx-hal 0.2.1 (git+https://github.com/chocol4te/stm32f1xx-hal)" = "<none>"
+"checksum stm32f1xx-hal 0.2.1 (git+https://github.com/stm32-rs/stm32f1xx-hal.git?rev=d66f170)" = "<none>"
 "checksum syn 0.15.29 (registry+https://github.com/rust-lang/crates.io-index)" = "1825685f977249735d510a242a6727b46efe914bb67e38d30c071b1b72b1d5c2"
 "checksum typenum 1.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "612d636f949607bdf9b123b4a6f6d966dedf3ff669f7f045890d3a4a73948169"
 "checksum unicode-xid 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fc72304796d0818e357ead4e000d19c9c174ab23dc11093ac919054d20a6a7fc"

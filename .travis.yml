@@ -1,0 +1,22 @@
+language: rust
+rust: stable
+env: TARGET_BUILD=thumbv7m-none-eabi
+
+stages:
+  - stylecheck
+  - compile
+
+jobs:
+  include:
+    - stage: stylecheck
+      script:
+        - rustup component add rustfmt
+        - cargo fmt --all -- --check
+    - stage: compile
+      script:
+        - rustup target add $TARGET_BUILD
+        - cargo check --target $TARGET_BUILD --all
+
+notifications:
+  email:
+    on_success: never
