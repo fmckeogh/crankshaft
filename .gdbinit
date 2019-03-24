@@ -4,9 +4,11 @@ end
 
 set pagination off
 
-target extended-remote /dev/cu.usbmodemC1E98D001
-mon swdp_scan
-att 1
+target remote :3333
+
+# target extended-remote /dev/cu.usbmodemC1E98D01
+# mon swdp_scan
+# att 1
 
 # print demangled symbols
 set print asm-demangle on
@@ -18,7 +20,7 @@ set print asm-demangle on
 # *try* to stop at the user entry point (it might be gone due to inlining)
 #break main
 
-# monitor arm semihosting enable
+monitor arm semihosting enable
 
 # monitor tpiu config external uart off 8000000 2000000
 # monitor itm port 0 on

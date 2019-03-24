@@ -1,0 +1,27 @@
+{
+    "name": "crankshaft-web",
+    "version": "1.0.0",
+    "description": "",
+    "keywords": [],
+    "main": "index.js",
+    "dependencies": {
+        "bootstrap": "^4.3.1",
+        "parcel-plugin-inliner": "^1.0.7",
+        "vue": "^2.6.10",
+        "vue-hot-reload-api": "^2.3.3"
+    },
+    "devDependencies": {
+        "@vue/component-compiler-utils": "^2.6.0",
+        "eslint": "^5.15.3",
+        "eslint-plugin-vue": "^5.2.2",
+        "parcel-bundler": "^1.12.3",
+        "parcel-plugin-eslint": "^1.0.7",
+        "sass": "^1.17.3",
+        "vue-template-compiler": "^2.6.10"
+    },
+    "scripts": {
+        "dev": "parcel index.html",
+        "build": "parcel build index.html --public-url . && wc -c dist/index.html && brotli -f --best dist/index.html && wc -c dist/index.html.br",
+        "lint": "eslint *.js *.vue"
+    }
+}
