@@ -34,7 +34,7 @@ static STATUS_HEADER: &'static [u8] =
     b"HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: http://192.168.1.2\r\n\r\n";
 
 const SRC_MAC: [u8; 6] = [0x20, 0x18, 0x03, 0x01, 0x00, 0x00];
-const CHUNK_SIZE: usize = 768;
+const CHUNK_SIZE: usize = 256;
 
 #[entry]
 fn main() -> ! {
@@ -114,8 +114,9 @@ fn main() -> ! {
     writeln!(serial, "enc26j60 initialized").unwrap();
 
     // PHY Wrapper
-    let mut buf = [0u8; 2048];
-    let mut eth = Phy::new(enc28j60, &mut buf);
+    let mut rx_buf = [0u8; 1024];
+    let mut tx_buf = [0u8; 1024];
+    let mut eth = Phy::new(enc28j60, &mut rx_buf, &mut tx_buf);
     writeln!(serial, "eth initialized").unwrap();
 
     // Ethernet interface
