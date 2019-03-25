@@ -27,8 +27,12 @@ use smoltcp::{
 };
 use stm32f1xx_hal::{delay::Delay, device, prelude::*, serial::Serial, spi::Spi};
 
-static HEADER: &'static [u8] = b"HTTP/1.1 200 OK\r\nContent-Encoding: br\r\n\r\n";
-static BODY: &'static [u8] = include_bytes!("../site/dist/index.html.br");
+static INDEX_HEADER: &'static [u8] = b"HTTP/1.1 200 OK\r\nContent-Encoding: br\r\n\r\n";
+static INDEX_BODY: &'static [u8] = include_bytes!("../index.html.br");
+
+static STATUS_HEADER: &'static [u8] =
+    b"HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: http://192.168.1.2\r\n\r\n";
+
 const SRC_MAC: [u8; 6] = [0x20, 0x18, 0x03, 0x01, 0x00, 0x00];
 const CHUNK_SIZE: usize = 768;
 
@@ -129,58 +133,96 @@ fn main() -> ! {
     writeln!(serial, "iface initialized").unwrap();
 
     // Sockets
-    let mut server_rx_buffer = [0; 2048];
-    let mut server_tx_buffer = [0; 2048];
-    let server_socket = TcpSocket::new(
+    let mut server_rx_buffer = [0; 1024];
+    let mut server_tx_buffer = [0; 1024];
+    let mut server_socket = TcpSocket::new(
         TcpSocketBuffer::new(&mut server_rx_buffer[..]),
         TcpSocketBuffer::new(&mut server_tx_buffer[..]),
+    );
+
+    let mut status_rx_buffer = [0; 1024];
+    let mut status_tx_buffer = [0; 1024];
+    let mut status_socket = TcpSocket::new(
+        TcpSocketBuffer::new(&mut status_rx_buffer[..]),
+        TcpSocketBuffer::new(&mut status_tx_buffer[..]),
     );
     let mut sockets_storage = [None, None];
     let mut sockets = SocketSet::new(&mut sockets_storage[..]);
     let server_handle = sockets.add(server_socket);
+    let status_handle = sockets.add(status_socket);
     writeln!(serial, "sockets initialized").unwrap();
 
     // LED on after initialization
     led.set_low();
+
+    let mut count: u64 = 0;
 
     let mut cursor: usize = 0;
     loop {
         match iface.poll(&mut sockets, Instant::from_millis(0)) {
             Ok(b) => {
                 if b {
-                    let mut socket = sockets.get::<TcpSocket>(server_handle);
-                    if !socket.is_open() {
-                        socket.listen(80).unwrap();
+                    {
+                        let mut server_socket = sockets.get::<TcpSocket>(server_handle);
+                        if !server_socket.is_open() {
+                            server_socket.listen(80).unwrap();
+                        }
+                        if server_socket.can_send() {
+                            if cursor == 0 {
+                                writeln!(serial, "tcp:80 sending").unwrap();
+                                writeln!(
+                                    serial,
+                                    "tcp:80 sent {}",
+                                    server_socket.send_slice(INDEX_HEADER).unwrap()
+                                );
+                            }
+
+                            if cursor + CHUNK_SIZE < INDEX_BODY.len() {
+                                writeln!(
+                                    serial,
+                                    "tcp:80 sent {}",
+                                    server_socket
+                                        .send_slice(&INDEX_BODY[cursor..(cursor + CHUNK_SIZE)])
+                                        .unwrap()
+                                );
+                                cursor += CHUNK_SIZE;
+                            } else if cursor + CHUNK_SIZE > INDEX_BODY.len()
+                                && cursor < INDEX_BODY.len()
+                            {
+                                writeln!(
+                                    serial,
+                                    "tcp:80 sent {}",
+                                    server_socket.send_slice(&INDEX_BODY[cursor..]).unwrap()
+                                );
+                                cursor += CHUNK_SIZE;
+                            } else {
+                                cursor = 0;
+                                writeln!(serial, "tcp:80 close").unwrap();
+                                server_socket.close();
+                            }
+                        }
                     }
 
-                    if socket.can_send() {
-                        led.toggle();
-
-                        if cursor == 0 {
-                            writeln!(serial, "tcp:80 sending").unwrap();
-                            writeln!(serial, "tcp:80 sent {}", socket.send_slice(HEADER).unwrap());
+                    {
+                        let mut status_socket = sockets.get::<TcpSocket>(status_handle);
+                        if !status_socket.is_open() {
+                            status_socket.listen(81).unwrap();
                         }
+                        if status_socket.can_send() {
+                            led.toggle();
+                            count += 1;
 
-                        if cursor + CHUNK_SIZE < BODY.len() {
-                            writeln!(
-                                serial,
-                                "tcp:80 sent {}",
-                                socket
-                                    .send_slice(&BODY[cursor..(cursor + CHUNK_SIZE)])
-                                    .unwrap()
+                            writeln!(serial, "tcp:81 sending").unwrap();
+                            status_socket.send_slice(STATUS_HEADER);
+                            write!(
+                                status_socket,
+                                "{{\r\n\t\"state\": {},\r\n\t\"count\": {}\r\n}}\r\n",
+                                led.is_set_low(),
+                                count
                             );
-                            cursor += CHUNK_SIZE;
-                        } else if cursor + CHUNK_SIZE > BODY.len() && cursor < BODY.len() {
-                            writeln!(
-                                serial,
-                                "tcp:80 sent {}",
-                                socket.send_slice(&BODY[cursor..]).unwrap()
-                            );
-                            cursor += CHUNK_SIZE;
-                        } else {
-                            cursor = 0;
-                            writeln!(serial, "tcp:80 close").unwrap();
-                            socket.close();
+
+                            writeln!(serial, "tcp:81 close").unwrap();
+                            status_socket.close();
                         }
                     }
                 }

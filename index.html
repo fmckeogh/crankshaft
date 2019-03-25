@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+  </head>
+  <body>
+    <h1>Crankshaft</h1>
+    <button onclick="toggle()">Toggle LED</button>
+
+    <div id="state">state:</div>
+    <div id="count">count:</div>
+  </body>
+</html>
+
+<script>
+    function toggle() {
+        fetch('http://192.168.1.2:81')
+        .then(res => res.json())
+        .then(res => {
+            document.getElementById('state').textContent = 'state: ' + res.state;
+            document.getElementById('count').textContent = 'count: ' + res.count;
+        });
+    };
+</script>
