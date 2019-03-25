@@ -40,14 +40,15 @@
 </html>
 
 <script>
-    function toggle() {
-        fetch('http://192.168.1.2:81')
-        .then(res => res.json())
+  window.onload = toggle;
+  function toggle() {
+    fetch('http://192.168.1.2:81')
+    .then(res => res.json())
         .then(res => {
             document.getElementById('state_val').textContent = res.state;
             document.getElementById('count_val').textContent = res.count;
         });
-    };
+  };
 </script>
 
 <style>
