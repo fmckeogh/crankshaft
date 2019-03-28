@@ -1,7 +1,9 @@
-use std::env;
-use std::fs::File;
-use std::io::Write;
-use std::path::PathBuf;
+use std::{
+    env,
+    fs::File,
+    io::{self, BufReader, BufWriter, Write},
+    path::PathBuf,
+};
 
 pub fn main() {
     // Put the linker script somewhere the linker can find it
@@ -14,4 +16,15 @@ pub fn main() {
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=memory.x");
+    println!("cargo:rerun-if-changed=index.html");
+
+    // Generate compressed site
+    let mut input = BufReader::new(File::open("index.html").unwrap());
+    let mut reader = brotli::CompressorReader::new(&mut input, 4096, 11, 21);
+    let mut writer = {
+        let f = File::create("index.html.br").unwrap();
+        f.set_len(0).unwrap();
+        BufWriter::new(f)
+    };
+    io::copy(&mut reader, &mut writer).unwrap();
 }
