@@ -22,8 +22,8 @@ set print asm-demangle on
 
 monitor arm semihosting enable
 
-# monitor tpiu config external uart off 8000000 2000000
-# monitor itm port 0 on
+monitor tpiu config internal itm.fifo uart off 50000000
+monitor itm port 0 on
 
 #echo clear EXCEVTENA; set PCSAMPLENA\n
 #monitor mmw 0xE0001000 4096 65536

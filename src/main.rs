@@ -1,37 +1,35 @@
-//! ENC28J60 + smoltcp demo
-//!
-//! Demonstrates how to use an ENC28J60 with smoltcp by running a simple demo that
-//! toggles and returns the current LED state.
-//!
-//! You can test this program with the following:
-//!
-//! - `ping 192.168.1.2`. The device will respond to every request (response time should be ~10ms).
-//! - `curl 192.168.1.2`. The device will respond with a HTTP response with the current
-//! LED state in the body.
-//! - Visiting `https://192.168.1.2/`. Every refresh will toggle the LED and the page will
-//! reflect the current state.
-//!
 #![no_std]
 #![no_main]
 
-extern crate panic_semihosting;
+#[macro_use]
+extern crate cortex_m;
+extern crate panic_itm;
 
-use core::fmt::Write;
-use enc28j60::{smoltcp_phy::Phy, Enc28j60};
-use rtfm::app;
-use smoltcp::{
-    iface::{EthernetInterfaceBuilder, NeighborCache},
-    socket::{SocketSet, TcpSocket, TcpSocketBuffer},
-    time::Instant,
-    wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address},
+use {
+    core::fmt::Write,
+    embedded_hal::digital::StatefulOutputPin,
+    enc28j60::{smoltcp_phy::Phy, Enc28j60},
+    rtfm::app,
+    smoltcp::{
+        iface::{EthernetInterfaceBuilder, NeighborCache},
+        socket::{SocketSet, TcpSocket, TcpSocketBuffer},
+        time::Instant,
+        wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address},
+    },
+    stm32f4xx_hal::{
+        delay::Delay,
+        gpio::{
+            gpioa::{PA3, PA4, PA5, PA6, PA7},
+            gpiod::PD14,
+            Alternate, Output, PushPull, AF5,
+        },
+        prelude::*,
+        spi::Spi,
+        stm32::{self as device, SPI1},
+    },
 };
-use stm32f1xx_hal::{
-    delay::Delay,
-    device::{self, SPI1},
-    prelude::*,
-    serial::Serial,
-    spi::Spi,
-};
+
+const CPU_HZ: u32 = 50_000_000;
 
 static INDEX_HEADER: &'static [u8] = b"HTTP/1.1 200 OK\r\nContent-Encoding: br\r\n\r\n";
 static INDEX_BODY: &'static [u8] = include_bytes!("../index.html.br");
@@ -41,102 +39,91 @@ static STATUS_HEADER: &'static [u8] =
 const SRC_MAC: [u8; 6] = [0x20, 0x18, 0x03, 0x01, 0x00, 0x00];
 const CHUNK_SIZE: usize = 256;
 
-#[app(device = stm32f1xx_hal::device)]
+#[app(device = stm32f4xx_hal::stm32)]
 const APP: () = {
-    static mut LED: stm32f1xx_hal::gpio::gpioc::PC13<
-        stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>,
-    > = ();
-    static mut SERIAL: stm32f1xx_hal::serial::Tx<device::USART1> = ();
-    static mut ETH: enc28j60::smoltcp_phy::Phy<
+    static mut LED: PD14<Output<PushPull>> = ();
+    static mut ITM: cortex_m::peripheral::ITM = ();
+    static mut ETH: Phy<
         'static,
-        stm32f1xx_hal::spi::Spi<
+        Spi<
             SPI1,
             (
-                stm32f1xx_hal::gpio::gpioa::PA5<
-                    stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::PushPull>,
-                >,
-                stm32f1xx_hal::gpio::gpioa::PA6<
-                    stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::Floating>,
-                >,
-                stm32f1xx_hal::gpio::gpioa::PA7<
-                    stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::PushPull>,
-                >,
+                PA5<Alternate<AF5>>,
+                PA6<Alternate<AF5>>,
+                PA7<Alternate<AF5>>,
             ),
         >,
-        stm32f1xx_hal::gpio::gpioa::PA4<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>,
+        PA4<Output<PushPull>>,
         enc28j60::Unconnected,
-        stm32f1xx_hal::gpio::gpioa::PA3<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>,
+        PA3<Output<PushPull>>,
     > = ();
-
     static mut RX_BUF: [u8; 1024] = [0u8; 1024];
     static mut TX_BUF: [u8; 1024] = [0u8; 1024];
 
     #[init(resources = [RX_BUF, TX_BUF])]
     fn init() {
-        let core: rtfm::Peripherals = core;
+        let mut core: rtfm::Peripherals = core;
         let device: device::Peripherals = device;
 
-        let mut rcc = device.RCC.constrain();
-        let mut afio = device.AFIO.constrain(&mut rcc.apb2);
-        let mut flash = device.FLASH.constrain();
-        let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
-        let mut gpiob = device.GPIOB.split(&mut rcc.apb2);
-        let mut gpioc = device.GPIOC.split(&mut rcc.apb2);
-        let clocks = rcc.cfgr.freeze(&mut flash.acr);
+        let gpioa = device.GPIOA.split();
+        let _gpiob = device.GPIOB.split();
+        let _gpioc = device.GPIOC.split();
+        let gpiod = device.GPIOD.split();
+
+        let clocks = {
+            // Power mode
+            device.PWR.cr.modify(|_, w| unsafe { w.vos().bits(0x11) });
+            // Flash latency
+            device
+                .FLASH
+                .acr
+                .modify(|_, w| unsafe { w.latency().bits(0x11) });
+
+            let rcc = device.RCC.constrain();
+            rcc.cfgr
+                .sysclk(CPU_HZ.hz())
+                .pclk1((CPU_HZ / 2).hz())
+                .pclk2(CPU_HZ.hz())
+                .hclk(CPU_HZ.hz())
+                .freeze()
+        };
+
+        let _stim = &mut core.ITM.stim[0];
 
         // LED
-        let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+        let mut led = gpiod.pd14.into_push_pull_output();
         // turn the LED off during initialization
         led.set_high();
 
-        // Serial
-        let mut serial = {
-            let tx = gpiob.pb6.into_alternate_push_pull(&mut gpiob.crl);
-            let rx = gpiob.pb7;
-            let serial = Serial::usart1(
-                device.USART1,
-                (tx, rx),
-                &mut afio.mapr,
-                115_200.bps(),
-                clocks,
-                &mut rcc.apb2,
-            );
-
-            serial.split().0
-        };
-        writeln!(serial, "serial start").unwrap();
-
         // SPI
         let spi = {
-            let sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
-            let miso = gpioa.pa6;
-            let mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
+            let sck = gpioa.pa5.into_alternate_af5();
+            let miso = gpioa.pa6.into_alternate_af5();
+            let mosi = gpioa.pa7.into_alternate_af5();
 
             Spi::spi1(
                 device.SPI1,
                 (sck, miso, mosi),
-                &mut afio.mapr,
                 enc28j60::MODE,
-                1.mhz(),
+                16_000_000.hz(),
                 clocks,
-                &mut rcc.apb2,
             )
         };
-        writeln!(serial, "spi initialized").unwrap();
+        iprintln!(_stim, "spi initialized");
 
         // ENC28J60
         let enc28j60 = {
-            let mut ncs = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
+            let mut rst = gpioa.pa3.into_push_pull_output();
+            rst.set_high();
+            let mut ncs = gpioa.pa4.into_push_pull_output();
             ncs.set_high();
-            let mut reset = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
-            reset.set_high();
             let mut delay = Delay::new(core.SYST, clocks);
 
             Enc28j60::new(
                 spi,
                 ncs,
                 enc28j60::Unconnected,
-                reset,
+                rst,
                 &mut delay,
                 7168,
                 SRC_MAC,
@@ -144,22 +131,23 @@ const APP: () = {
             .ok()
             .unwrap()
         };
-        writeln!(serial, "enc26j60 initialized").unwrap();
+        iprintln!(_stim, "enc26j60 initialized");
 
         // PHY Wrapper
-        let mut eth = Phy::new(enc28j60, resources.RX_BUF, resources.TX_BUF);
-        writeln!(serial, "eth initialized").unwrap();
+        let eth = Phy::new(enc28j60, resources.RX_BUF, resources.TX_BUF);
+        iprintln!(_stim, "phy initialized");
 
-        // LED on after initialization
-        led.set_low();
-
+        iprintln!(_stim, "init complete");
         LED = led;
-        SERIAL = serial;
+        ITM = core.ITM;
         ETH = eth;
     }
 
-    #[idle(resources = [LED, SERIAL, ETH])]
+    #[idle(resources = [LED, ITM, ETH])]
     fn idle() -> ! {
+        let _stim = &mut resources.ITM.stim[0];
+        iprintln!(_stim, "start idle");
+
         // Ethernet interface
         let ethernet_addr = EthernetAddress(SRC_MAC);
         let local_addr = Ipv4Address::new(192, 168, 1, 2);
@@ -172,7 +160,7 @@ const APP: () = {
             .ip_addrs(&mut ip_addrs[..])
             .neighbor_cache(neighbor_cache)
             .finalize();
-        writeln!(resources.SERIAL, "iface initialized").unwrap();
+        iprintln!(_stim, "iface initialized");
 
         // Sockets
         let mut server_rx_buffer = [0; 1024];
@@ -192,7 +180,7 @@ const APP: () = {
         let mut sockets = SocketSet::new(&mut sockets_storage[..]);
         let server_handle = sockets.add(server_socket);
         let status_handle = sockets.add(status_socket);
-        writeln!(resources.SERIAL, "sockets initialized").unwrap();
+        iprintln!(_stim, "sockets initialized");
 
         let mut count: u64 = 0;
         let mut cursor: usize = 0;
@@ -208,38 +196,35 @@ const APP: () = {
                             }
                             if server_socket.can_send() {
                                 if cursor == 0 {
-                                    writeln!(resources.SERIAL, "tcp:80 sending").unwrap();
-                                    writeln!(
-                                        resources.SERIAL,
+                                    iprintln!(_stim, "tcp:80 sending");
+                                    iprintln!(
+                                        _stim,
                                         "tcp:80 sent {}",
                                         server_socket.send_slice(INDEX_HEADER).unwrap()
-                                    )
-                                    .unwrap();
+                                    );
                                 }
 
                                 if cursor + CHUNK_SIZE < INDEX_BODY.len() {
-                                    writeln!(
-                                        resources.SERIAL,
+                                    iprintln!(
+                                        _stim,
                                         "tcp:80 sent {}",
                                         server_socket
                                             .send_slice(&INDEX_BODY[cursor..(cursor + CHUNK_SIZE)])
                                             .unwrap()
-                                    )
-                                    .unwrap();
+                                    );
                                     cursor += CHUNK_SIZE;
                                 } else if cursor + CHUNK_SIZE > INDEX_BODY.len()
                                     && cursor < INDEX_BODY.len()
                                 {
-                                    writeln!(
-                                        resources.SERIAL,
+                                    iprintln!(
+                                        _stim,
                                         "tcp:80 sent {}",
                                         server_socket.send_slice(&INDEX_BODY[cursor..]).unwrap()
-                                    )
-                                    .unwrap();
+                                    );
                                     cursor += CHUNK_SIZE;
                                 } else {
                                     cursor = 0;
-                                    writeln!(resources.SERIAL, "tcp:80 close").unwrap();
+                                    iprintln!(_stim, "tcp:80 close");
                                     server_socket.close();
                                 }
                             }
@@ -254,7 +239,7 @@ const APP: () = {
                                 resources.LED.toggle();
                                 count += 1;
 
-                                writeln!(resources.SERIAL, "tcp:81 sending").unwrap();
+                                iprintln!(_stim, "tcp:81 sending");
                                 status_socket.send_slice(STATUS_HEADER).unwrap();
                                 write!(
                                     status_socket,
@@ -264,14 +249,14 @@ const APP: () = {
                                 )
                                 .unwrap();
 
-                                writeln!(resources.SERIAL, "tcp:81 close").unwrap();
+                                iprintln!(_stim, "tcp:81 close");
                                 status_socket.close();
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    writeln!(resources.SERIAL, "Error: {:?}", e).unwrap();
+                    iprintln!(_stim, "Error: {:?}", e);
                 }
             }
         }
