@@ -9,7 +9,7 @@ cortex-m = "0.5.8"
 stm32f4xx-hal = { version = "0.3.0", features = ["stm32f411", "rt"] }
 cortex-m-rt = "0.6.8"
 cortex-m-rtfm = "0.4.2"
-enc28j60 = { git = "https://github.com/chocol4te/enc28j60.git", rev = "f5bd30a", features = ["smoltcp"] }
+enc28j60 = { git = "https://github.com/chocol4te/enc28j60.git", rev = "bd17e61", features = ["smoltcp"] }
 embedded-hal = "0.2.2"
 smoltcp =  { version = "0.5.0", default_features = false, features = ["proto-ipv4", "socket-tcp"] }
 heapless = "0.4.2"

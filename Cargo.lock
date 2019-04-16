@@ -131,7 +131,7 @@ dependencies = [
  "cortex-m-rt 0.6.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "cortex-m-rtfm 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "embedded-hal 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "enc28j60 0.3.0 (git+https://github.com/chocol4te/enc28j60.git?rev=f5bd30a)",
+ "enc28j60 0.3.0 (git+https://github.com/chocol4te/enc28j60.git?rev=bd17e61)",
  "heapless 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "panic-itm 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "smoltcp 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -150,7 +150,7 @@ dependencies = [
 [[package]]
 name = "enc28j60"
 version = "0.3.0"
-source = "git+https://github.com/chocol4te/enc28j60.git?rev=f5bd30a#f5bd30a1f016078463997c44f9129d10561f612d"
+source = "git+https://github.com/chocol4te/enc28j60.git?rev=bd17e61#bd17e61746fb38cfdc2377042a4691c5047cdca6"
 dependencies = [
  "as-slice 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -399,7 +399,7 @@ dependencies = [
 "checksum cortex-m-rtfm 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "12b165b9c6ab11aebd304fac4dd6ef10f69dbac2e9f6858e4c98da3588e70412"
 "checksum cortex-m-rtfm-macros 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "a25f736f4c63385e923036a9708a8447b21a7a46299bdd3678f81d1f36d7c990"
 "checksum embedded-hal 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "9880e55238830314d41d88f1ac7a819d495799c3cc3bc392cc172bab26428c33"
-"checksum enc28j60 0.3.0 (git+https://github.com/chocol4te/enc28j60.git?rev=f5bd30a)" = "<none>"
+"checksum enc28j60 0.3.0 (git+https://github.com/chocol4te/enc28j60.git?rev=bd17e61)" = "<none>"
 "checksum generic-array 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)" = "8107dafa78c80c848b71b60133954b4a58609a3a1a5f9af037ecc7f67280f369"
 "checksum generic-array 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3c0f28c2f5bfb5960175af447a2da7c18900693738343dc896ffbcabd9839592"
 "checksum hash32 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "12d790435639c06a7b798af9e1e331ae245b7ef915b92f70a39b4cf8c00686af"
