@@ -1,6 +1,6 @@
 language: rust
 rust: stable
-env: TARGET_BUILD=thumbv7m-none-eabi
+env: TARGET_BUILD=thumbv7em-none-eabihf
 
 stages:
   - stylecheck
@@ -15,7 +15,7 @@ jobs:
     - stage: compile
       script:
         - rustup target add $TARGET_BUILD
-        - cargo check --target $TARGET_BUILD --all
+        - cargo build --release --target $TARGET_BUILD
 
 notifications:
   email:
