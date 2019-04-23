@@ -8,19 +8,20 @@ edition = "2018"
 cortex-m = "0.5.8"
 stm32f4xx-hal = { version = "0.3.0", features = ["stm32f411", "rt"] }
 cortex-m-rt = "0.6.8"
-cortex-m-rtfm = "0.4.2"
+cortex-m-rtfm = { version = "0.4.2", features = ["timer-queue"] }
 enc28j60 = { git = "https://github.com/chocol4te/enc28j60.git", rev = "bd17e61", features = ["smoltcp"] }
 embedded-hal = "0.2.2"
 smoltcp =  { version = "0.5.0", default_features = false, features = ["proto-ipv4", "socket-tcp"] }
-heapless = "0.4.2"
-panic-itm = "0.4.0"
+heapless = "0.4.3"
+panic-semihosting = "0.5.1"
 
 [build-dependencies]
 brotli = "3.3.0"
 
-[profile.release]
-opt-level = "s"
-lto = true
-
 [profile.dev]
 opt-level = "s"
+
+[profile.release]
+lto = true
+opt-level = "s"
+debug = true
