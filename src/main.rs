@@ -5,9 +5,11 @@
 extern crate cortex_m;
 extern crate panic_semihosting;
 
+mod motor;
+
 use {
+    crate::motor::{ControlState, MotorDriver, Phase},
     core::fmt::Write,
-    embedded_hal::digital::{OutputPin, StatefulOutputPin},
     enc28j60::{smoltcp_phy::Phy, Enc28j60},
     heapless::{consts::U16, Vec},
     rtfm::app,
@@ -71,16 +73,13 @@ const APP: () = {
     static mut RX_BUF: [u8; 1024] = [0u8; 1024];
     static mut TX_BUF: [u8; 1024] = [0u8; 1024];
 
-    #[init(resources = [RX_BUF, TX_BUF], schedule = [motor])]
+    #[init(resources = [RX_BUF, TX_BUF], schedule = [motor_task])]
     fn init() {
         let mut core: rtfm::Peripherals = core;
         let device: device::Peripherals = device;
 
         let gpioa = device.GPIOA.split();
-        let _gpiob = device.GPIOB.split();
-        let _gpioc = device.GPIOC.split();
         let gpiod = device.GPIOD.split();
-        let gpioe = device.GPIOE.split();
 
         let clocks = {
             // Power mode
@@ -165,7 +164,7 @@ const APP: () = {
             MotorDriver::new(a, b, c)
         };
         schedule
-            .motor(rtfm::Instant::now() + CPU_HZ.cycles())
+            .motor_task(rtfm::Instant::now() + CPU_HZ.cycles())
             .unwrap();
 
         iprintln!(_stim, "init: complete\n");
@@ -212,9 +211,7 @@ const APP: () = {
             iprintln!(&mut itm.stim[0], "idle: sockets");
         });
 
-        let mut count: u64 = 0;
         let mut cursor: usize = 0;
-
         loop {
             match iface.poll(&mut sockets, smoltcp::time::Instant::from_millis(0)) {
                 Ok(b) => {
@@ -332,8 +329,8 @@ const APP: () = {
         }
     }
 
-    #[task(priority = 2, schedule = [motor], resources = [ITM, MOTOR_DRIVER, MOTOR_CONTROL])]
-    fn motor() {
+    #[task(priority = 2, schedule = [motor_task], resources = [ITM, MOTOR_DRIVER, MOTOR_CONTROL])]
+    fn motor_task() {
         let _stim = &mut resources.ITM.stim[0];
 
         match *resources.MOTOR_CONTROL {
@@ -356,7 +353,9 @@ const APP: () = {
             resources.MOTOR_DRIVER.comm_state
         );
 
-        schedule.motor(scheduled + (CPU_HZ / 32).cycles()).unwrap();
+        schedule
+            .motor_task(scheduled + (CPU_HZ / 128).cycles())
+            .unwrap();
     }
 
     extern "C" {
@@ -369,171 +368,6 @@ struct NopDelay;
 impl embedded_hal::blocking::delay::DelayMs<u8> for NopDelay {
     fn delay_ms(&mut self, ms: u8) {
         cortex_m::asm::delay(u32::from(ms) * CPU_HZ / 1000);
-    }
-}
-
-pub struct MotorDriver<
-    AL: OutputPin + StatefulOutputPin,
-    AH: OutputPin + StatefulOutputPin,
-    BL: OutputPin + StatefulOutputPin,
-    BH: OutputPin + StatefulOutputPin,
-    CL: OutputPin + StatefulOutputPin,
-    CH: OutputPin + StatefulOutputPin,
-> {
-    pub a: Phase<AL, AH>,
-    pub b: Phase<BL, BH>,
-    pub c: Phase<CL, CH>,
-    pub comm_state: CommutationState,
-}
-
-#[derive(Debug)]
-pub enum ControlState {
-    Idle,
-    Brake,
-    Forward,
-    Reverse,
-}
-
-#[derive(Debug)]
-pub enum CommutationState {
-    AB,
-    AC,
-    BC,
-    BA,
-    CA,
-    CB,
-}
-
-impl CommutationState {
-    fn next(&self) -> Self {
-        match self {
-            CommutationState::AB => CommutationState::AC,
-            CommutationState::AC => CommutationState::BC,
-            CommutationState::BC => CommutationState::BA,
-            CommutationState::BA => CommutationState::CA,
-            CommutationState::CA => CommutationState::CB,
-            CommutationState::CB => CommutationState::AB,
-        }
-    }
-
-    fn previous(&self) -> Self {
-        match self {
-            CommutationState::AB => CommutationState::CB,
-            CommutationState::AC => CommutationState::AB,
-            CommutationState::BC => CommutationState::AC,
-            CommutationState::BA => CommutationState::BC,
-            CommutationState::CA => CommutationState::BA,
-            CommutationState::CB => CommutationState::AB,
-        }
-    }
-}
-
-impl<
-        A_L: OutputPin + StatefulOutputPin,
-        A_H: OutputPin + StatefulOutputPin,
-        B_L: OutputPin + StatefulOutputPin,
-        B_H: OutputPin + StatefulOutputPin,
-        C_L: OutputPin + StatefulOutputPin,
-        C_H: OutputPin + StatefulOutputPin,
-    > MotorDriver<A_L, A_H, B_L, B_H, C_L, C_H>
-{
-    fn new(a: Phase<A_L, A_H>, b: Phase<B_L, B_H>, c: Phase<C_L, C_H>) -> Self {
-        Self {
-            a,
-            b,
-            c,
-            comm_state: CommutationState::AB,
-        }
-    }
-
-    fn step(&mut self, direction: bool) {
-        self.comm_state = match direction {
-            true => self.comm_state.next(),
-            false => self.comm_state.previous(),
-        };
-        //self.comm_state = self.comm_state.next();
-
-        match self.comm_state {
-            CommutationState::AB => {
-                self.a.set_high();
-                self.b.set_low();
-                self.c.set_floating();
-            }
-            CommutationState::AC => {
-                self.a.set_high();
-                self.b.set_floating();
-                self.c.set_low();
-            }
-            CommutationState::BC => {
-                self.a.set_floating();
-                self.b.set_high();
-                self.c.set_low();
-            }
-            CommutationState::BA => {
-                self.a.set_low();
-                self.b.set_high();
-                self.c.set_floating();
-            }
-            CommutationState::CA => {
-                self.a.set_low();
-                self.b.set_floating();
-                self.c.set_high();
-            }
-            CommutationState::CB => {
-                self.a.set_floating();
-                self.b.set_low();
-                self.c.set_high();
-            }
-        }
-    }
-
-    fn set_idle(&mut self) {
-        self.a.set_floating();
-        self.b.set_floating();
-        self.c.set_floating();
-    }
-}
-
-pub struct Phase<L: OutputPin + StatefulOutputPin, H: OutputPin + StatefulOutputPin> {
-    low_gate: L,
-    high_gate: H,
-}
-
-impl<L: OutputPin + StatefulOutputPin, H: OutputPin + StatefulOutputPin> Phase<L, H> {
-    fn new(mut low_gate: L, mut high_gate: H) -> Self {
-        high_gate.set_low();
-        low_gate.set_low();
-
-        Self {
-            low_gate,
-            high_gate,
-        }
-    }
-
-    fn set_floating(&mut self) {
-        self.high_gate.set_low();
-        self.low_gate.set_low();
-    }
-
-    /// Set the phase to VIN
-    fn set_high(&mut self) {
-        self.low_gate.set_low();
-
-        self.high_gate.set_high();
-    }
-
-    /// Set the phase to ground
-    fn set_low(&mut self) {
-        self.high_gate.set_low();
-        self.low_gate.set_high();
-    }
-
-    fn is_set_high(&mut self) -> bool {
-        self.high_gate.is_set_high() && self.low_gate.is_set_low()
-    }
-
-    fn is_set_low(&mut self) -> bool {
-        self.low_gate.is_set_high() && self.high_gate.is_set_low()
     }
 }
 
