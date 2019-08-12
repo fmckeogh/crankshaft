@@ -12,7 +12,7 @@ cortex-m-rtfm = { version = "0.4.3", features = ["timer-queue"] }
 enc28j60 = { git = "https://github.com/chocol4te/enc28j60.git", rev = "bd17e61", features = ["smoltcp"] }
 embedded-hal = "0.2.2"
 smoltcp =  { version = "0.5.0", default_features = false, features = ["proto-ipv4", "socket-tcp"] }
-heapless = "0.4.4"
+heapless = "0.5.0"
 panic-semihosting = "0.5.1"
 
 [build-dependencies]
