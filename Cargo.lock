@@ -141,7 +141,7 @@ dependencies = [
  "embedded-hal 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "enc28j60 0.3.0 (git+https://github.com/chocol4te/enc28j60.git?rev=bd17e61)",
  "heapless 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "panic-semihosting 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "panic-semihosting 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "smoltcp 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "stm32f4xx-hal 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "panic-semihosting"
-version = "0.5.1"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "cortex-m 0.5.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -420,7 +420,7 @@ dependencies = [
 "checksum owned-singleton 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "21aa378869c97c7db706a4c576cf0ce8258dc7e0e1ad25a97ee5aba1fd4eed83"
 "checksum owned-singleton-macros 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "8d5c2ac071b95017bf70a5b607037fb0ef4abfa663fdf6cac8fbf36af9756ee3"
 "checksum owning-slice 0.1.0 (git+https://github.com/japaric/owning-slice)" = "<none>"
-"checksum panic-semihosting 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "a647d81e7b00f69deac766cd96d69fc11c95c18657d2448b539ae93e4c558689"
+"checksum panic-semihosting 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)" = "c03864ac862876c16a308f5286f4aa217f1a69ac45df87ad3cd2847f818a642c"
 "checksum proc-macro2 0.4.27 (registry+https://github.com/rust-lang/crates.io-index)" = "4d317f9caece796be1980837fd5cb3dfec5613ebdb04ad0956deea83ce168915"
 "checksum quote 0.6.11 (registry+https://github.com/rust-lang/crates.io-index)" = "cdd8e04bd9c52e0342b406469d494fcb033be4bdbe5c606016defbb1681411e1"
 "checksum r0 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "e2a38df5b15c8d5c7e8654189744d8e396bddc18ad48041a500ce52d6948941f"
