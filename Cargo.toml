@@ -13,7 +13,7 @@ enc28j60 = { git = "https://github.com/chocol4te/enc28j60.git", rev = "bd17e61",
 embedded-hal = "0.2.2"
 smoltcp =  { version = "0.5.0", default_features = false, features = ["proto-ipv4", "socket-tcp"] }
 heapless = "0.4.4"
-panic-semihosting = "0.5.1"
+panic-semihosting = "0.5.3"
 
 [build-dependencies]
 brotli = "3.3.0"
