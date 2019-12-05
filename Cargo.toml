@@ -5,7 +5,7 @@ authors = ["Ferdia McKeogh <ferdia@mckeogh.tech>"]
 edition = "2018"
 
 [dependencies]
-cortex-m = "0.5.8"
+cortex-m = "0.6.1"
 stm32f4xx-hal = { version = "0.3.0", features = ["stm32f411", "rt"] }
 cortex-m-rt = "0.6.11"
 cortex-m-rtfm = { version = "0.4.3", features = ["timer-queue"] }
