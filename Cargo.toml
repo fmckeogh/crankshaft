@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 cortex-m = "0.6.1"
 stm32f4xx-hal = { version = "0.3.0", features = ["stm32f411", "rt"] }
-cortex-m-rt = "0.6.11"
+cortex-m-rt = "0.6.13"
 cortex-m-rtfm = { version = "0.4.3", features = ["timer-queue"] }
 enc28j60 = { git = "https://github.com/chocol4te/enc28j60.git", rev = "bd17e61", features = ["smoltcp"] }
 embedded-hal = "0.2.3"
